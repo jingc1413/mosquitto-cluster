@@ -2328,15 +2328,52 @@ static int config__check(struct mosquitto__config *config)
 	while(itfs){
 		if(itfs->ifa_addr->sa_family == AF_INET){
 			tmpAddrPtr = &((struct sockaddr_in *)itfs->ifa_addr)->sin_addr;
+            const char *itfs_ip = inet_ntoa(*tmpAddrPtr);
 			for(i=0; i<config->node_count; i++){
 				node1 = &config->nodes[i];
+                bool is_samePort = false;
 				for(j=0; j<config->listener_count; j++){
+                    //printf("listener port[%d]:%d\n", j, config->listeners[j].port);
 			 		if(config->listeners[j].port == node1->port)
-						break;
+                    {
+                        is_samePort = true;
+                        break;
+                    }
 				}
-				if(j == config->listener_count)
-					continue;
-				if(inet_addr(node1->address) == tmpAddrPtr->s_addr){
+//				if(j == config->listener_count)
+//					continue;
+				struct hostent *hptr;
+				in_addr_t node_addr;
+				//printf("node hostname to ip   %s\n",node1->address);
+                bool is_local = false;
+				if((hptr = gethostbyname(node1->address)) == NULL)
+				{
+                    printf("get hostbyname err: %s\n", node1->address);
+					node_addr = inet_addr(node1->address);
+                    is_local = node_addr == tmpAddrPtr->s_addr;
+                    printf("local path: %lX - %lX\n", node_addr, tmpAddrPtr->s_addr);
+				}
+
+				else
+				{
+					char str[50];
+					char** pptr=hptr->h_addr_list;
+					for(; *pptr!=NULL; pptr++)
+                    {
+//                        printf(" address:%s\n",
+//                               inet_ntop(hptr->h_addrtype, *pptr, str, sizeof(str)));
+                        node_addr = inet_addr(inet_ntop(hptr->h_addrtype, hptr->h_addr_list, str, sizeof(str)));
+                        printf("gethost succ, %s - %s\n", itfs_ip, inet_ntop(hptr->h_addrtype, *pptr, str, sizeof(str)));
+                        if (strcmp(itfs_ip, inet_ntop(hptr->h_addrtype, *pptr, str, sizeof(str))) == 0 && is_samePort)
+                        {
+                            log__printf(NULL, MOSQ_LOG_ERR, "%s-%s:%d is the local node for cluster", node1->name, node1->address, node1->port);
+                            is_local = true;
+                            break;
+                        }
+                    }
+				}
+                //printf("is_local:%d\n", is_local);
+				if(is_local){
 					mosquitto__free(node1->name);
 					mosquitto__free(node1->address);
 					mosquitto__free(node1->remote_clientid);
